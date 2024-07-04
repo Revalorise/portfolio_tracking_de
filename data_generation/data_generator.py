@@ -3,13 +3,17 @@ from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
+from google.cloud import storage
 
 
-class StockDataGenerator:
-    def __init__(self, ticker: str, start_date: str, end_date: str) -> None:
+class StockDataManager:
+
+    credentials = '../gcp_project_key.json'
+    storage_client = storage.Client.from_service_account_json(credentials)
+    bucket = storage_client.get_bucket('portfolio_tracking_de')
+
+    def __init__(self, ticker: str) -> None:
         self.ticker = ticker
-        self.start_date = start_date
-        self.end_date = end_date
 
     def _get_data(self) -> pd.DataFrame:
         """
@@ -18,8 +22,7 @@ class StockDataGenerator:
         """
         data = yf.download(
             self.ticker,
-            start=self.start_date,
-            end=self.end_date
+            period="max"
         )
 
         return pd.DataFrame(data)
@@ -30,21 +33,40 @@ class StockDataGenerator:
         Args:
             data: dataframe of stock data
         """
-        file = Path(f"../data/{self.ticker}_{self.start_date}_{self.end_date}.csv")
+        file = Path(f"../data/{self.ticker}_data.csv")
 
         if file.exists():
             print(f"{file} already exists... skipping..")
         else:
             data = self._get_data()
-            data.to_csv(f"../data/{self.ticker}_{self.start_date}_{self.end_date}.csv")
+            data.to_csv(f"../data/{self.ticker}_data.csv")
+
+    def load_to_gcs(self, file: str) -> None:
+        """
+        Load data from data folder to Google Cloud Storage, existing data will be skipped.
+        Args:
+            file: file path of data
+        """
+        file_name = file.split("/")[2]
+        print(f"Uploading {file_name} to Google Cloud Storage...")
+        blob = self.bucket.blob(file_name)
+
+        if self.bucket.blob(file_name).exists():
+            print(f"{file_name} already exist in Google Cloud Storage... skipping..")
+            pass
+        else:
+            blob.upload_from_filename(file)
+
+        print(f"{file_name} uploaded successfully!")
 
 
 if __name__ == "__main__":
-    apple_data = StockDataGenerator("AAPL", "2011-01-01", "2021-12-31")
-    nvidia_data = StockDataGenerator("NVDA", "2011-01-01", "2021-12-31")
-    tesla_data = StockDataGenerator("TSLA", "2011-01-01", "2021-12-31")
-    amazon_data = StockDataGenerator("AMZN", "2011-01-01", "2021-12-31")
-    amd_data = StockDataGenerator("AMD", "2011-01-01", "2021-12-31")
+    apple_data = StockDataManager("AAPL")
+    nvidia_data = StockDataManager("NVDA")
+    tesla_data = StockDataManager("TSLA")
+    amazon_data = StockDataManager("AMZN")
+    amd_data = StockDataManager("AMD")
 
     for data in [apple_data, nvidia_data, tesla_data, amazon_data, amd_data]:
         data.save_data()
+        data.load_to_gcs(f"../data/{data.ticker}_data.csv")
